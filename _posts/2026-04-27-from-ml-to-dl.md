@@ -25,11 +25,11 @@ toc:
 
 It is a widely held belief in the ML community that tree-based models are the most sensible choice for tabular data and that neural networks will invariably underperform. As a result, using neural networks in this domain is frequently met with skepticism—not only regarding their potential performance, but also their practicality (e.g., latency, GPU requirements, interpretability).
 
-These concerns are empirically motivated [grinsz], but often misunderstood: for any fixed search budget, tree-based models consistently outperform non–tree-based alternatives. However, we argue that the perceived underperformance often stems from two factors: scale and uncertainty.
+These concerns are empirically motivated <d-cite key="grinsz"></d-cite>, but often misunderstood: for any fixed search budget, tree-based models consistently outperform non–tree-based alternatives. However, we argue that the perceived underperformance often stems from two factors: scale and uncertainty.
 
 First, many empirical comparisons rely on small-scale academic benchmarks that favor sample-efficient tree-based methods while underutilizing neural networks. Second, feasibility concerns often implicitly equate "deep learning" with large-language-model–style infrastructure—multi-billion-parameter architectures, expensive training pipelines, and complex deployment stacks—when in fact tabular neural networks need not resemble LLMs in either size or serving complexity.
 
-In this work, we describe the migration of our flagship risk system—scoring thousands of transactions per second—from a large, well-tuned tree-based model to a neural network. We also outline why we believe that, at scale, neural networks can not only match but surpass gradient-boosted trees on tabular data, while bringing substantial ancillary benefits.
+In this work, we describe the migration of our flagship risk system -- scoring thousands of transactions per second -- from a large, well-tuned tree-based model to a neural network. We also outline why we believe that, at scale, neural networks can not only match but surpass gradient-boosted trees on tabular data, while bringing substantial ancillary benefits.
 
 
 ## Background - Risk at Company
@@ -86,9 +86,9 @@ graph LR
     VF --> FDM
 ```
 
-Historically, our risk stack was built around a large boosting model. It was easy to adopt, straightforward to scale, and strong on tabular data. As a result, raw model choice was not an immediate bottleneck: most improvements came from feature engineering, platform integration, and expanding model scope—making deep learning difficult to prioritize.
+Historically, our risk stack was built around a large boosting model. It was easy to adopt, straightforward to scale, and strong on tabular data. As a result, raw model choice was not an immediate bottleneck: most improvements came from feature engineering, platform integration, and expanding model scope -- making deep learning difficult to prioritize.
 
-Over time, however, signs emerged that a shift could unlock further gains. Many input signals are inherently sequential (timestamps, event streams) or textual. While engineered proxies helped — rolling-window aggregates, hashed or bucketed email features — these approaches approximate rather than directly learn from raw signal structure.
+Over time, however, signs emerged that a shift could unlock further gains. Many input signals are inherently sequential (timestamps, event streams) or textual. While engineered proxies helped — rolling-window aggregates, hashed or bucketed email features -- these approaches approximate rather than directly learn from raw signal structure.
 
 Operational pressures also increased. Growing transaction volume (billion scale) and feature count strained out-of-core training and constant-memory inference. Meanwhile, Company’s long-term strategy emphasized deep learning: foundational payments models, model unification, and multi-task learning.
 
@@ -100,12 +100,13 @@ To see why neural networks could eventually outperform tree-based models on tabu
 
 ### Why Tree-Based Models Excel at Tabular Data
 
-Tree-based models remain the dominant choice for tabular tasks because their **inductive bias matches the structure of the data.** Tabular features are often categorical, sparse, piecewise, and highly non-smooth. Trees naturally capture this structure through axis-aligned splits and non-linear rule partitions. A single decision tree already encodes sharp discontinuities and local feature interactions that dense NNs typically struggle with [Grisz].
+Tree-based models remain the dominant choice for tabular tasks because their **inductive bias matches the structure of the data.** Tabular features are often categorical, sparse, piecewise, and highly non-smooth. Trees naturally capture this structure through axis-aligned splits and non-linear rule partitions. A single decision tree already encodes sharp discontinuities and local feature interactions that dense NNs typically struggle with <d-cite key="grinsz"></d-cite>
+
+.
 
 Added to that and true power of boosting emerges from ensembling. Boosting constructs a large committee of weak learners, each correcting the residuals of the previous one, yielding a flexible and high-capacity model. This *homogeneous ensemble* scales extremely well with modest compute and is sample-efficient—crucial advantages for most tabular benchmarks.
 
-This connects to the **No Free Lunch principle**:  
-no single model class is universally optimal, but **an ensemble of diverse models often outperforms any single one.**
+This connects to the **No Free Lunch principle**: no single model class is universally optimal, but **an ensemble of diverse models often outperforms any single one.**
 
 Ensembling underlies:
 - **bagging**
@@ -125,7 +126,7 @@ This observation suggests a natural migration path: **extend boosting from a hom
 
 Rather than replacing the tree model outright, we can **stack** multiple learners—boosters, MLPs, attention models—and train a meta-learner over their predictions. This leverages complementary inductive biases while keeping the stable baseline in place.
 
-Heterogeneous ensembling has repeatedly proven effective in practice<d-cite key="tabarena"></d-cite> [tabm]. It makes sense, if boosting is an ensemble or trees, why would not compare NNs against it as an ensemble? Why leap directly from boosting to deep learning; instead, **ensembling serves as a stable bridge** while the neural model matures.
+Heterogeneous ensembling has repeatedly proven effective in practice<d-cite key="tabarena, tabm"></d-cite>. And it makes sense, if boosting is an ensemble or trees, why would not compare NNs against it as an ensemble? Why leap directly from boosting to deep learning; instead, **ensembling serves as a stable bridge** while the neural model matures.
 
 
 ```mermaid
@@ -159,12 +160,12 @@ Stacking allows:
 * continuous improvement as NN architectures mature
 * safe fallback to boosting during migration
 
-This leads to the final question: how to we tackle the inductive bias problem in NNs?
+This leads to the final question: how do we tackle the inductive bias problem in NNs?
 
 ##. How Do We Make Neural Networks Competitive on Tabular Data?
 
-Despite strong ensembles, neural networks still typically underperform trees on tabular tasks<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite><d-cite key="chen2023tromptbetterdeepneural"></d-cite>.
-The gap is driven by differences in inductive bias:
+Despite strong ensembles, neural networks still typically underperform trees on tabular tasks <d-cite key="tabm"></d-cite>.
+The gap is driven by differences in inductive bias <d-cite key="grisz"></d-cite>:
 
 1. Smoothness bias — MLPs favor smooth boundaries; tabular patterns are often sharp.
 1. Rotational invariance — NNs are rotation-invariant, while trees exploit axis alignment.
@@ -172,14 +173,14 @@ The gap is driven by differences in inductive bias:
 
 > Takeaway: You can't just throw NNs at tabular data (w/ a meaningful budget).
 
-However, recent work shows these limitations can be overcome[RealMLP, Reg-All-You-Need, ExcelFormer] with thoughtful tuning:
-* discretization and learned embeddings for continuous values [embeddings]
-* attention architectures for tabular structure [execlformer]
-* large-scale training + augmentation [excelformer]
-* regularization [excelformer, realmlp, regisallyouneed]
-* activations [excelformer]
+However, recent work <d-cite key="excelformer, realmlp, reg-is-all-you-need"></d-cite> shows these limitations can be overcome with thoughtful tuning:
+* discretization and learned embeddings for continuous values <d-cite key="embeddings"></d-cite>
+* attention architectures for tabular structure <d-cite key="excelformer"></d-cite>
+* large-scale training + augmentation <d-cite key="excelformer"></d-cite>
+* regularization <d-cite key="excelformer, realmlp, reg-is-all-you-need"></d-cite>
+* activations <d-cite key="excelformer"></d-cite>
 
-Alongside industry reports where NNs eventually outperformed boosting [facebook, stripe, sharechat, swiggy], these results suggest that:
+Alongside industry reports where NNs eventually outperformed boosting <d-cite key="facebook, stripe, sharechat, swiggy"></d-cite>, these results suggest that:
 
 > If we design the right inductive bias for NNs — and ensemble them during migration —
 >they can match or surpass boosted trees at scale.
@@ -189,36 +190,32 @@ In the next section, we describe how we operationalized and tested this hypothes
 
 ## Operationalizing the Migration: Our Approach
 
-The complete transition of our fraud detection models from ML to DL ranged from October 2024 to September 2025. Given the uncertainties regarding the performance and deployability of neural networks and stacking models, we avoided a large-scale monolithic migration and instead focused on shorter, iterative experiments.
+The complete transition of our fraud detection models from ML to DL ranged from October 2024 to September 2025. Given the uncertainties regarding the performance and deployability of neural networks and ensembling models, we avoided a large-scale monolithic migration and instead focused on shorter, iterative experiments.
 
 
 ### Offline Experiments
 
-We ran an initial feasibility study to evaluate whether a neural network would outperform our current boosting model for fraud detection on our offline benchmarks. For simplicity and arguably lack of nuance, we used the boosting feature set.
-
-We built a lightweight experimentation loop focused on rapid iteration rather than production readiness.
-We initially leveraged the [PyTorch Frame](https://github.com/pyg-team/pytorch-frame) <d-cite key="hu2024pytorch"></d-cite> library, which conveniently collects popular NN architectures for tabular data from the literature, ranging from simple MLP and ResNet<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite> architectures to novel solutions such as FT-Transformer (attention-based models for tabular data)<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite>, TabNet<d-cite key="arik2020tabnetattentiveinterpretabletabular"></d-cite>, and ExcelFormer <d-cite key="chen2024excelformerneuralnetworksurpassing"></d-cite>.
-The library also includes several popular encoding schemes for numerical and categorical features.
-This allowed us to iterate over these architectures to see how they adapted to our problem space and scale.
+We ran an initial feasibility study to evaluate the performance of neural networks against our boosting model baseline. For simplicity and arguably lack of nuance, we used the existing boosting feature set unmodified. We built a lightweight experimentation loop focused on rapid iteration rather than production readiness.
+We initially experimented with simple MLP and ResNet<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite> architectures to novel solutions such as FT-Transformer (attention-based models for tabular data)<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite>, TabNet<d-cite key="arik2020tabnetattentiveinterpretabletabular"></d-cite>, and ExcelFormer <d-cite key="excelformer"></d-cite>.
 
 After running multiple training and tuning experiments, we observed that neural networks overall underperformed by 18% to 30% on our internal metrics versus our boosting baselines across a combination of architectures and encoding schemes:
 
-- On the architecture side, we surprisingly observed that performance metrics did not significantly differ across architectures: simple architectures such as MLP and ResNet were just as good (or, in this case, just as bad) as complex ones such as FT-Transformer or TabNet, although the latter were shown to bring significant performance uplift on smaller benchmarks <d-cite key="rubachev2024tabredanalyzingpitfallsfilling"></d-cite>. Furthermore, model training time increased significantly with the complexity of the architectures on our then fairly immature GPU cluster, rendering the training of some architectures, like ExcelFormer, prohibitively time-consuming.
+- On the architecture side, we surprisingly observed that performance metrics did not significantly differ across architectures: simple architectures such as MLP and ResNet were just as good (or, in this case, just as bad) as complex ones such as FT-Transformer or TabNet, although the latter were shown to bring significant performance uplift on smaller benchmarks <d-cite key="tabred"></d-cite>. Furthermore, model training time increased significantly with the complexity of the architectures on our then fairly immature GPU cluster, rendering the training of some architectures, like ExcelFormer, prohibitively time-consuming.
 
-- On the encoding side, we found that an adequate encoding scheme for numerical and categorical features was essential for acceptable performance from neural networks. Here again, complex encoding schemes such as piecewise linear encoding or numerical embeddings <d-cite key="gorishniy2023embeddingsnumericalfeaturestabular"></d-cite> did not bring uplift and sometimes significantly increased training time. A simple combination of standard scaling and masking missing values for numerical features, and learned embeddings for categorical features, gave the best results.
+- On the encoding side, we found that an adequate encoding scheme for numerical and categorical features was essential for acceptable performance from neural networks. Here again, complex encoding schemes such as piecewise linear encoding or numerical embeddings <d-cite key="embeddings"></d-cite> did not bring uplift and sometimes significantly increased training time. A simple combination of standard scaling and masking missing values for numerical features, and learned embeddings for categorical features, gave the best results.
 
 This first run of experiments allowed us to settle, quite surprisingly, on the simplest available architecture: a wide, shallow MLP of around 10M parameters.
 This architecture yielded superior performance among the architectures we could train (in a close tie with ResNet) and trained relatively fast, taking around 10 hours at the time to converge on our training sets.
 
-The surprising finding that a simple MLP was the most stable and scalable architecture for our problem shifted our strategy from finding the best architecture to making a simple architecture good at scale and matches recent findings in the literature <d-cite key="realmlp"></d-cite><d-cite key="He2014PracticalLF"></d-cite>.
+The surprising finding that a simple MLP was the most stable and scalable architecture for our problem shifted our strategy from finding the best architecture to making a simple architecture good at scale and matches recent findings in the literature <d-cite key="realmlp"></d-cite><d-cite key="facebook"></d-cite>.
 
 
 ### Ensembling as a Bridge
 
-We then turned our efforts to the stacking strategy that would best complement the MLP architecture.
+We then turned our efforts to the stacking ensemble strategy that would best complement the MLP architecture.
 We used a simple ridge classifier as our meta-learner and compared two popular forms of stacking:
 - A *simple* stacking scheme in which the predictions of the MLP and the boosting model are fed as two inputs to the meta-learner. This is the most basic form of stacking, as the meta-learner receives only two input features with no extra information about the sample it is scoring.
-- A *deep* stacking scheme in which the predictions of each individual tree from the booster and activations from the second-to-last layer of the MLP are fed to the meta-learner. This allows for a richer representation of the underlying sample being scored <d-cite key="He2014PracticalLF"></d-cite>.
+- A *deep* stacking scheme in which the predictions of each individual tree from the booster and activations from the second-to-last layer of the MLP are fed to the meta-learner. This allows for a richer representation of the underlying sample being scored <d-cite key="facebook"></d-cite>.
 
 ```mermaid
 graph TD
@@ -285,6 +282,7 @@ On the other hand, the deep stacking scheme, although passing substantially more
 
 These results were encouraging since stacking provided direct uplift compared to boosting.
 Furthermore, there were several unexplored approaches that could provide future performance gains on the neural network side: we had done no feature engineering, hyperparameter tuning was kept minimal, and the network architecture was extremely simple.
+
 Given these prospective improvements, we prioritized exploratory work on the transition of the model in production through stacking as it provided a great migration strategy: it gave immediate incremental gains without directly replacing the boosting models and offered a safety net while the neural network matured.
 
 However, we remained cautious due to the numerous unknowns regarding its deployability and latency in the live payment flow.
@@ -293,6 +291,7 @@ However, we remained cautious due to the numerous unknowns regarding its deploya
 ### Live Validation
 
 The next essential step of the migration was validating whether the performance gains obtained through stacking offline could be achieved in production.
+
 More specifically, we wanted to ensure that our stacking model could correctly score transactions in production while respecting our strict latency requirements.
 
 The simple stacking scheme we settled on made it trivial to combine the boosting model and neural network to fulfill the two model interfaces that would be called in production: `score`, which requests a probability of fraud for a transaction, and `explain`, which generates merchant-facing signals explaining the model's decision.
@@ -345,8 +344,7 @@ These incremental changes increased the importance of the neural network within 
 
 {% include figure.liquid path="assets/img/2026-04-27-from-ml-to-dl/figure1.png" class="img-fluid" %}
 
-Finally, we fully switched to the standalone neural network once we observed that it consistently matched or outperformed the stacking model.
-The stacking strategy we adopted made the entire transition seamless, as the model could just be deployed to production while a stacking fallback was still available.
+Finally, we fully switched to the standalone neural network once we observed that it consistently matched or outperformed the stacking model. The stacking strategy we adopted made the entire transition seamless, as the model could just be deployed to production while a stacking fallback was still available.
 
 ## Learnings
 
