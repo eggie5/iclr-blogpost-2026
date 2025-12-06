@@ -2,9 +2,8 @@
 layout: distill
 title: [How to Transition from ML to DL in Production - Lessons From the Trenches at Company]
 description: [
-  A large and mature gradient-boosted tree model had been powering Company’s fraud detection for years.
-  We gradually migrated to a pure deep learning model over the past year going through a heterogeneous stacking phase that reached parity before outperforming our boosting model in production.
-  We learned along the way that a simple ResNet can beat sophisticated tabular DL architectures at million-scale (1); stacking is a practical bridge from ML to DL (2); and the biggest wins from DL are often beyond metrics (3).
+  A mature and entrenched boosting system has been powering Company’s risk systems for years.
+  We outline our year long incremental migration strategy to a pure deep learning system which is highlighted by an intermediate heterogeneous ensembling phase used to reached parity and then outperforming our boosting model in production. We learned along the way that a simple MLPs can beat sophisticated tabular DL architectures at million-scale (1); ensembling is a practical bridge from ML to DL (2); and the biggest wins from DL are often beyond metrics (3).
 ]
 date: 2026-04-27
 future: true
@@ -21,40 +20,31 @@ authors:
 bibliography: 2026-04-27-from-ml-to-dl.bib
 toc:
   - name: Background - Fraud Detection at Company
-  - name: Heterogeneous Ensembling as a Migration Strategy
-  - name: Transition Process
-    subsections:
-      - name: Offline Experiments
-      - name: Ensembling as a Bridge
-      - name: Live Validation
-      - name: Scaling and Transition
-  - name: Learnings
-  - name: Future Work
+
 ---
 
-It is a widely held belief in the ML community that tree-based models are the only sensible choice for tabular data. Adoption of neural networks for these tasks is usually met with skepticism about their applicability (e.g., latency concerns, GPU usage at inference time, explainability) and performance, since trees typically excel at predictions on tabular data.
+It is a widely held belief in the ML community that tree-based models are the most sensible choice for tabular data and that neural networks will invariably underperform. As a result, using neural networks in this domain is frequently met with skepticism—not only regarding their potential performance, but also their practicality (e.g., latency, GPU requirements, interpretability).
 
-These concerns are not entirely unfounded, but are often rooted in two issues. Regarding performance, benchmarks usually stem from small-scale academic datasets that favor tree methods and under-resource neural networks. Regarding feasibility, deep learning tends to be conflated with large language models, which require massive infrastructure, multi-billion-parameter models, and complex serving stacks.
+These concerns are empirically motivated [grinsz], but often misunderstood: for any fixed search budget, tree-based models consistently outperform non–tree-based alternatives. However, we argue that the perceived underperformance often stems from two factors: scale and uncertainty.
 
-In this post, we present a real-world case study from Company, a global payments processor. We describe how we migrated our flagship fraud detection model, scoring thousands of transactions per second, from a large, well-tuned boosting model to a pure neural network. We also outline why we believe that, at scale, neural networks can not only match but also outperform gradient-boosted trees on tabular data, and bring substantial ancillary benefits.
+First, many empirical comparisons rely on small-scale academic benchmarks that favor sample-efficient tree-based methods while underutilizing neural networks. Second, feasibility concerns often implicitly equate "deep learning" with large-language-model–style infrastructure—multi-billion-parameter architectures, expensive training pipelines, and complex deployment stacks—when in fact tabular neural networks need not resemble LLMs in either size or serving complexity.
 
-The transition was not a one-shot replacement. We went through an intermediate ensembling process that improved performance and reduced migration risk before we could fully transition and consolidate on a pure deep learning model. Along the way, we tried many tabular DL architectures from the literature, observed surprising results at our scale, and leaned heavily on intermediate ensembling and pragmatism to deploy the model in production.
-This report outlines the results and lessons we encountered during this transition.
+In this work, we describe the migration of our flagship risk system—scoring thousands of transactions per second—from a large, well-tuned tree-based model to a neural network. We also outline why we believe that, at scale, neural networks can not only match but surpass gradient-boosted trees on tabular data, while bringing substantial ancillary benefits.
 
 
-## Background - Fraud Detection at Company
+## Background - Risk at Company
 
-Company processes large volumes of payments for merchants worldwide.
-A key part of this process is our Fraud Detection Model (FDM), which estimates in real time the likelihood that a payment is fraudulent and approves, challenges, or blocks it accordingly.
-The cost of errors is high: blocking legitimate payments hurts merchants' authorization rates and shoppers' experience, while approving fraudulent ones leads to significant financial losses for merchants.
+Company processes large volumes of payments for merchants worldwide. A key component of this process is our Fraud Detection Model (FDM), which estimates in real time the likelihood that a payment is fraudulent, allowing the system to approve, challenge, or block transactions accordingly.
 
-Our fraud detection model consumes a large, evolving feature set combining:
+The cost of errors is high. Type I errors (blocking legitimate payments) degrade merchant authorization rates and harm shopper experience, while Type II errors (approving fraudulent transactions) lead to direct financial losses. Balancing these trade-offs while maintaining low latency and high throughput is central to the design of our risk models.
 
-- Basic payment-level features
-- Aggregate features, such as rolling statistics across many merchant and shopper dimensions, served by our feature platform.
-- Shopper features, such as histories of payments, refusals, and identifiers across all of our merchants and regions, served by our shopper linking algorithm.
-- Velocity features, such as the number of payment attempts across multiple dimensions, served as timestamp arrays by our velocity database.
-- Structured fields containing payment information in raw string format.
+Our system consumes a large and evolving feature set, including:
+
+- basic payment-level features
+- aggregate features (rolling statistics across merchant and shopper dimensions) computed by our feature platform
+- shopper history signals served through our entity-linking system
+- velocity features such as recent payment attempts across multiple dimensions
+- structured and semi-structured string fields containing raw payment metadata
 
 
 ```mermaid
@@ -96,42 +86,55 @@ graph LR
     VF --> FDM
 ```
 
-FDM’s ML stack was originally built on a large boosting model based on LightGBM: it was easy to adopt, simple to scale, and excellent on tabular data. 
-As a result, model choice wasn’t an immediate bottleneck; most gains came from feature engineering, deeper platform integration, and expanding model scope, which made deep learning hard to prioritize.
+Historically, our risk stack was built around a large boosting model. It was easy to adopt, straightforward to scale, and strong on tabular data. As a result, raw model choice was not an immediate bottleneck: most improvements came from feature engineering, platform integration, and expanding model scope—making deep learning difficult to prioritize.
 
-Still, we knew a switch would eventually be needed to unlock uplift beyond what boosting could deliver. 
-Many FDM inputs are naturally structured sequences (timestamps, past payments) or raw text. While careful feature engineering helped (e.g., rolling-window shopper aggregates, proxy email features), these signals weren’t fully exploited.
-Growth also created operational pressure: rising payment volume and feature count strained out-of-core training and constant-memory inference.
-At the same time, the company’s long-term strategy emphasized deep learning—foundational payments models, model unification, and multi-task learning.
+Over time, however, signs emerged that a shift could unlock further gains. Many input signals are inherently sequential (timestamps, event streams) or textual. While engineered proxies helped — rolling-window aggregates, hashed or bucketed email features — these approaches approximate rather than directly learn from raw signal structure.
 
-We concluded that a well-designed neural network could outperform given the right scale and infrastructure, but a hard cutover from a trusted boosting model would be risky.
+Operational pressures also increased. Growing transaction volume (billion scale) and feature count strained out-of-core training and constant-memory inference. Meanwhile, Company’s long-term strategy emphasized deep learning: foundational payments models, model unification, and multi-task learning.
 
-## Heterogeneous Ensembling as a Migration Strategy
+We hypothesized that a well-designed neural network could provide both first-order performance uplift and second-order benefits: improved representation learning, reduced feature-engineering burden, better extensibility, and alignment with strategic goals.
 
-The observation that tree-based models typically outperform neural networks on tabular data has been explored in recent work<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite><d-cite key="chen2023tromptbetterdeepneural"></d-cite>.
-This performance gap is often explained by a few key arguments.
-One is *smoothness bias*, where standard NNs favor smooth decision boundaries, which can be a poor fit for the piecewise-constant structures common in tabular problems.
-Another is *rotational invariance*, as NNs are generally rotation-invariant while trees are sensitive to axis-aligned splits.
-Finally, there is the issue of *scale* since trees are sample efficient and handle small to medium datasets extremely well, whereas NNs often require more data and/or careful regularization.
+## Why Deep Learning on Tabular Data Might Work
 
-The literature also suggests remedies to these limitations, including discretization and binning, embeddings for numerical features, attention-based architectures to mitigate rotational invariance, and augmentation with large-scale training to exploit NNs as universal approximators.
+To see why neural networks could eventually outperform tree-based models on tabular data, we must first understand **why boosting works so well today.**
 
-We took inspiration from these ideas, but also from industry case studies where NNs or heterogeneous ensembles beat boosting models in production.
-Migration narratives from ShareChat<d-cite key="Jeunen_2023"></d-cite> for short-video recommendations, Swiggy<d-cite key="swiggy2021learningtorank"></d-cite> for restaurant ranking, Stripe <d-cite key="stripe2020howwebuiltitstriperadar"></d-cite> for payment fraud detection, and internal anecdotes from eBay all point to a similar pattern of leveraging heterogeneous ensembling (stacking) as a temporary model instead of directly migrating from boosting to neural networks.
+### Why Tree-Based Models Excel at Tabular Data
 
-Our production boosting models were already a form of ensembling (albeit homogeneous), as they combine many similar weak trees into a strong model.
-This approach could be extended through heterogeneous ensembling, in which multiple classes of learners, such as boosting models and neural networks, are combined to solve the same task.
-Ensembling approaches (e.g., bagging, boosting, stacking) have been extremely effective at winning competitions on tabular data <d-cite key="erickson2025tabarenalivingbenchmarkmachine"></d-cite><d-cite key="holzmüller2025betterdefaultstrongpretuned"></d-cite>.
-This illustrates the *No Free Lunch* theorem, which suggests that no single model class can dominate on all learning tasks.
-We eventually chose to explore heterogeneous ensembling through stacking, in which diverse learners are trained to solve a task, and a meta-learner is trained on the same task using the learners' predictions as input features.
+Tree-based models remain the dominant choice for tabular tasks because their **inductive bias matches the structure of the data.** Tabular features are often categorical, sparse, piecewise, and highly non-smooth. Trees naturally capture this structure through axis-aligned splits and non-linear rule partitions. A single decision tree already encodes sharp discontinuities and local feature interactions that dense NNs typically struggle with [Grisz].
+
+Added to that and true power of boosting emerges from ensembling. Boosting constructs a large committee of weak learners, each correcting the residuals of the previous one, yielding a flexible and high-capacity model. This *homogeneous ensemble* scales extremely well with modest compute and is sample-efficient—crucial advantages for most tabular benchmarks.
+
+This connects to the **No Free Lunch principle**:  
+no single model class is universally optimal, but **an ensemble of diverse models often outperforms any single one.**
+
+Ensembling underlies:
+- **bagging**
+- **boosting (XGBoost, LightGBM)**
+- **stacking — the backbone of most Kaggle-winning tabular systems**
+
+In short:
+
+> **Boosting ≈ Trees (right inductive bias) + Ensembling (power multiplier).**  
+> If we want the benefits of NNs without losing performance, we must replicate *both* components.
+
+Lets take homogeneous ensembling to it's logical conclusion: heterogenous ensembling.
+
+### Heterogeneous Ensembling with Deep Models
+
+This observation suggests a natural migration path: **extend boosting from a homogeneous ensemble of trees to a heterogeneous ensemble that mixes trees and neural models.**
+
+Rather than replacing the tree model outright, we can **stack** multiple learners—boosters, MLPs, attention models—and train a meta-learner over their predictions. This leverages complementary inductive biases while keeping the stable baseline in place.
+
+Heterogeneous ensembling has repeatedly proven effective in practice<d-cite key="tabarena"></d-cite> [tabm]. It makes sense, if boosting is an ensemble or trees, why would not compare NNs against it as an ensemble? Why leap directly from boosting to deep learning; instead, **ensembling serves as a stable bridge** while the neural model matures.
+
 
 ```mermaid
 graph TD
   A[Input Features]
 
   subgraph "Base Learners"
-      B[Network 1]
-      C[Network 2]
+      B[Neural Net]
+      C[Alternative NN]
       D[Booster 1]
       E[Booster 2]
   end
@@ -142,30 +145,56 @@ graph TD
   A --> E
 
   F(Meta-Learner)
+  B --> F
+  C --> F
+  D --> F
+  E --> F
 
-  B  --> F
-  C  --> F
-  D  --> F
-  E  --> F
+  F --> G[Final Prediction]
+ ```
+  
+Stacking allows:
 
-  F --> G[Prediction]
-```
+* immediate incremental uplift from adding a small NN
+* continuous improvement as NN architectures mature
+* safe fallback to boosting during migration
 
-Aside from usually yielding superior performance compared to single learner classes, stacking also provides a valuable and safe blueprint for transitioning to deep learning.
-A simple stacking of our current boosting models with a fairly basic neural network could result in direct but moderate performance uplift.
-We could then gradually improve the neural network while serving it within a stacking model in production until it was strong enough to be deployed on its own, ensuring a smooth transition and incremental performance gains.
+This leads to the final question: how to we tackle the inductive bias problem in NNs?
 
-Of course, this approach would first have to be validated experimentally on our large fraud detection dataset before this transition plan could be enacted.
+##. How Do We Make Neural Networks Competitive on Tabular Data?
 
-## Transition Process
+Despite strong ensembles, neural networks still typically underperform trees on tabular tasks<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite><d-cite key="chen2023tromptbetterdeepneural"></d-cite>.
+The gap is driven by differences in inductive bias:
 
-The complete transition of our fraud detection models from ML to DL ranged from October 2024 to September 2025.
-Given the uncertainties regarding the performance and deployability of neural networks and stacking models, we avoided a large-scale monolithic migration and instead focused on shorter, iterative experiments.
+1. Smoothness bias — MLPs favor smooth boundaries; tabular patterns are often sharp.
+1. Rotational invariance — NNs are rotation-invariant, while trees exploit axis alignment.
+1. Scale sensitivity — trees excel at small/medium datasets; NNs need regularization and data.
+
+> Takeaway: You can't just throw NNs at tabular data (w/ a meaningful budget).
+
+However, recent work shows these limitations can be overcome[RealMLP, Reg-All-You-Need, ExcelFormer] with thoughtful tuning:
+* discretization and learned embeddings for continuous values [embeddings]
+* attention architectures for tabular structure [execlformer]
+* large-scale training + augmentation [excelformer]
+* regularization [excelformer, realmlp, regisallyouneed]
+* activations [excelformer]
+
+Alongside industry reports where NNs eventually outperformed boosting [facebook, stripe, sharechat, swiggy], these results suggest that:
+
+> If we design the right inductive bias for NNs — and ensemble them during migration —
+>they can match or surpass boosted trees at scale.
+
+In the next section, we describe how we operationalized and tested this hypothesis at Company.
+
+
+## Operationalizing the Migration: Our Approach
+
+The complete transition of our fraud detection models from ML to DL ranged from October 2024 to September 2025. Given the uncertainties regarding the performance and deployability of neural networks and stacking models, we avoided a large-scale monolithic migration and instead focused on shorter, iterative experiments.
+
 
 ### Offline Experiments
 
-We ran an initial feasibility study to evaluate whether a neural network would outperform our current boosting model for fraud detection on our offline benchmarks.
-Even though feature pruning and engineering efforts seemed promising for bringing additional uplift to neural networks, we kept the experiment's scope simple by comparing models on the current production feature set.
+We ran an initial feasibility study to evaluate whether a neural network would outperform our current boosting model for fraud detection on our offline benchmarks. For simplicity and arguably lack of nuance, we used the boosting feature set.
 
 We built a lightweight experimentation loop focused on rapid iteration rather than production readiness.
 We initially leveraged the [PyTorch Frame](https://github.com/pyg-team/pytorch-frame) <d-cite key="hu2024pytorch"></d-cite> library, which conveniently collects popular NN architectures for tabular data from the literature, ranging from simple MLP and ResNet<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite> architectures to novel solutions such as FT-Transformer (attention-based models for tabular data)<d-cite key="gorishniy2023revisitingdeeplearningmodels"></d-cite>, TabNet<d-cite key="arik2020tabnetattentiveinterpretabletabular"></d-cite>, and ExcelFormer <d-cite key="chen2024excelformerneuralnetworksurpassing"></d-cite>.
@@ -181,7 +210,7 @@ After running multiple training and tuning experiments, we observed that neural 
 This first run of experiments allowed us to settle, quite surprisingly, on the simplest available architecture: a wide, shallow MLP of around 10M parameters.
 This architecture yielded superior performance among the architectures we could train (in a close tie with ResNet) and trained relatively fast, taking around 10 hours at the time to converge on our training sets.
 
-The surprising finding that a simple MLP was the most stable and scalable architecture for our problem shifted our strategy from finding the best architecture to making a simple architecture good at scale and matches recent findings in the literature <d-cite key="holzmüller2025betterdefaultstrongpretuned"></d-cite><d-cite key="He2014PracticalLF"></d-cite>.
+The surprising finding that a simple MLP was the most stable and scalable architecture for our problem shifted our strategy from finding the best architecture to making a simple architecture good at scale and matches recent findings in the literature <d-cite key="realmlp"></d-cite><d-cite key="He2014PracticalLF"></d-cite>.
 
 
 ### Ensembling as a Bridge
