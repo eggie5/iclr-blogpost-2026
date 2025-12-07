@@ -382,7 +382,7 @@ While the migration is a success in itself that already brought performance impr
 Among these future avenues, we identify:
 
 - **Multi-task and multi-objective modelling.** 
-Now that the core risk model of Company is powered by a neural network, it becomes easier to consider integrating other domain-specific risk models (e.g. card testing or abusive refunds detection) in a multi-task risk model or using multi-objective losses that balance fraud, customer experience, and operational costs. This could leverage the specificities of these multiple models in a large unified network, and greatly reduce operational workloads.
+Now that the core risk model of Company is powered by a neural network, it becomes easier to consider integrating other domain-specific risk models (e.g. card testing or abusive refunds detection) in a multi-task risk model or using multi-objective losses that balance fraud, customer experience, and operational costs. This could leverage the specificities of these multiple models in a large unified network, and greatly reduce operational overhead.
 
 - **Closer integration with foundation models.** 
 Company has ongoing work on foundation models for payments. A deep learning-based fraud model provides a natural anchor for integrating such models, whether through shared embeddings, pretraining on large-scale transaction data, or joint training for related tasks.
